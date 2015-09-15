@@ -54,13 +54,17 @@ and since there are no unit tests that can assure that it will avoid
 dangerous situations.
 
 Eventhough I have designed this tool with dangers in mind, like trying to let the user know
-what are the commands going to be executed, and so on, what I can recommend to have a backup copy of
-use it in a directory that that you have under a SCM (Software Control Management) such as Git
-or Subversion or CVS, in case things go wrong you can revert the changes, until v1.0 is reached.
+what are the commands going to be executed.
+By default (and at least until we reach version 1.0) as a security meassure `prr` will 
+do two things:
 
-Before version 1.0, `prr` will set the **confirm** option (`-c`) on, by default.
+1. Sets the **confirm** option (`-c`) on, by default. So you will be asked to confirm and showed the
+  command that will be executed, and the list of files that will be modified.
 
-If you want to override this option, set the flag `-C`. 
+2. Sets the **backup** options (`-b`) on, by default. Files will be backed up with the extension `.prr-bak`.
+  Just be aware that only older backups for the same file will be overwritten by the new ones.
+
+You can turn off both options by using `-C` and `-B` respectively.
 
 Alternatively you can combine the following options:
 * __debug__ (`-D`): to see how the options are interpreted, the commands being run.
