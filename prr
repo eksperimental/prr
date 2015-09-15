@@ -1,0 +1,379 @@
+#!/bin/bash
+
+# prr : Search and replace files recursively.
+# For more information about this project, visit:
+# https://github.com/eksperimental/prr
+# License: Public Domain
+# Usage: prr -h 
+#
+# prr [SEARCH_FLAGS] [-o SEARCH_OPTIONS] SEARCH_PATTERN REPLACE_PATTERN [PATH]
+prr() {
+  local APP_NAME="prr"
+  local APP_TITLE="P(erl) R(eplace) R(ecursively)"
+  local APP_VERSION="0.0.3"
+  local ARGS="${*}"
+  # Flags
+  local search_flags="-l"
+  local replace_flags=""
+  local search_options=""
+  # Args
+  local f_confirm=1
+  local f_no_confirm=0
+  local f_dry_run=0
+  local f_debug=0
+  local f_insensitive=0
+#  local f_follow_symlinks=0
+  local f_global=0
+  local f_help=0
+  local f_multiline=0
+  local f_search_options=0
+  local f_unrestricted=0
+  local f_verbose=0
+  local f_version=0
+  # Options
+  local search_pattern
+  local replace_pattern
+  local -a path
+  # Command strings 
+  local replace_command_string
+  local search_command_string
+  # Results
+  local -a files
+  local file_matches
+
+__prr-help() {
+cat << EOF
+${APP_NAME} v$(__prr-version 1) – ${APP_TITLE}
+Search and replace files recursively.
+
+It uses a combination both of the fastest tools for the job:
+* "ag" (the silver searcher) – for searching the files
+* perl for actually doing the string substitutions them.
+
+Usage: ${APP_NAME} [-cCdDghimuvV] [-o SEARCH_OPTIONS] SEARCH_PATTERN REPLACE_PATTERN [PATH]
+
+  -c            Confirm before replacing. It will list the files that
+                  will be modified, and the perl command that is going
+                  to be executed.
+                  Enabled by default before release of v1.0
+  -C            Skip confirmation (overrides "-c").
+  -d            Dry-run. Do not execute any replacements.
+                  List the files that matched the SEARCH PATTERN.
+  -D            Print debug info. It does not execute any command.
+  -i            Case insensitive
+  -g            Global replacement (replaces all occurrences)
+  -h            Shows this help menu
+  -m            Multi-line replacement
+  -o            Search options. Any valid extra argument accepted by
+                  "ag" searcher.
+                  Ex: "--ignore-dir ./somedir/ --ignore *.ext"
+                  Please surround all options in one set of quotes.
+  -u            Unrestricted search. ignores "ignore files" such us
+                .gitignore, .agignore
+                  By default files listed in these files are ignored
+  -v            Verbose
+  -V            Print version number
+ 
+  SEARCH        search regular expression
+  REPLACE       replace regular expression
+  PATH          multiple directory or file to look for files.
+                  e.g. "dir1" "dir2"
+ 
+Example:
+  # replace all occurences of "alpha" (case insensitive) with "beta"
+  prr -ig "alpha" "beta" 
+ 
+  # replace recusirvely all occurrences of "Mon-Fri" with "Fri-Sun" (case sensitive)
+  prr -g "(Mon)-(Fri)" "\$2-Sun"
+
+Project Source Code:
+  https://github.com/eksperimental/prr
+EOF
+}
+
+__prr-debug() {
+  echo "* DEBUGGING INFORMATION *" >&2
+  echo "version:" >&2
+  echo "  $(__prr-version 1)" >&2
+  echo "flags:" >&2
+  echo "  -c: ${f_confirm}" >&2
+  echo "  -C: ${f_no_confirm}" >&2
+  echo "  -d: ${f_dry_run}" >&2
+  echo "  -D: ${f_debug}" >&2
+#  echo "  -f: ${f_follow_symlinks}" >&2
+  echo "  -g: ${f_global}" >&2
+  echo "  -h: ${f_help}" >&2
+  echo "  -i: ${f_insensitive}" >&2
+  echo "  -m: ${f_multiline}" >&2
+  echo "  -o: ${f_search_options}" >&2
+  echo "  -o (arg): ${search_options}" >&2
+  echo "  -u: ${f_unrestricted}" >&2
+  echo "  -v: ${f_verbose}" >&2
+  echo "  -V: ${f_version}" >&2
+  echo "parameters:" >&2
+  echo "  SEARCH_PATTERN: ${search_pattern}" >&2
+  echo "  REPLACE_PATTERN: ${replace_pattern}" >&2
+  echo "  PATH: ${path[*]}" >&2
+  echo "search command:" >&2
+  echo "  ${search_command_string}" >&2
+  echo "replace command:" >&2
+  echo " ${replace_command_string}" >&2
+  echo  >&2
+}
+
+# if an argument is pass, it prints only the version number (excludes app_name)
+__prr-version() {
+  if [ -z "${1}" ]; then
+    echo "${APP_NAME} ${APP_VERSION}"
+  else
+    echo "${APP_VERSION}"
+  fi
+}
+
+# __prr-search-command SEARCH_FLAGS SEARCH_OPTIONS SEARCH_PATTERN PATH
+__prr-search-command() {
+  ag ${1} ${2} -- "${3}" "${@:4}"
+}
+
+# __prr-build-search-command-string SEARCH_FLAGS SEARCH_OPTIONS SEARCH_PATTERN PATH
+__prr-build-search-command-string() {
+  echo "ag ${1} ${2} -- \"${3}\" ${*:4}"
+}
+
+# __prr-replace-command REPLACE_FLAGS SEARCH_PATTERN REPLACE_PATTERN FILES 
+__prr-replace-command() {
+  printf '%q\n' "${@:4}" | xargs perl -pi -CSA -e "s/${2}/${3}/${1}"
+}
+
+# __prr-build-replace-command-string REPLACE_FLAGS SEARCH_PATTERN REPLACE_PATTERN
+__prr-build-replace-command-string() {
+  echo "perl -pi -CSA -e \"s/${2}/${3}/${1}\""
+}
+
+
+__prr-check-requirements() {
+  command -v ag >/dev/null 2>&1 || {
+    echo >&2 "\"ag\" is required. Please get it from: https://github.com/ggreer/the_silver_searcher/"
+    return 1
+  }
+  command -v perl >/dev/null 2>&1 || {
+    echo >&2 "\"perl\" is required. Please get it from: https://www.perl.org/get.html"
+    return 1
+  }
+  return 0
+}
+
+__prr-confirm() {
+  local reply ask
+  
+  if [ "${ask}" = "no" ]; then
+    return 1
+  else
+   reply=""
+    printf '%s [Y/N]: ' "$*"
+    read reply
+    if printf '%s\n' "${reply}" | grep -Eq '^[yY].*'; then
+      return 0
+    else
+      return 1
+    fi
+  fi
+}
+
+__prr-tmp-dir() {
+  # http://unix.stackexchange.com/questions/30091/fix-or-alternative-for-mktemp-in-os-x
+  local _tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t 'tmpdir')"
+  trap 'rm -rf "$_tmp_dir"' EXIT
+
+  # check that the dir is writable.
+  if [ ! -w "${_tmp_dir}" ]; then
+    echo "* [ERROR] Temporary directory is not writable: ${_tmp_dir}" >&2
+    return 1 
+  fi
+
+  echo "${_tmp_dir}"
+}
+
+##### END OF PRIVATE FUNCTIONS #####
+
+  __prr-check-requirements || return 1
+
+  # GETOPTS
+  # http://mywiki.wooledge.org/BashFAQ/035#getopts
+  # A POSIX variable
+  OPTIND=1 # Reset in case getopts has been used previously in the shell.
+
+  while getopts ":cCdDghimo:uvV" opt; do
+    case "$opt" in
+    c)  f_confirm=1
+        ;;
+    C)  f_no_confirm=1
+        ;;
+    d)  f_dry_run=1
+        ;;
+    D)  f_debug=1
+        ;;
+    # f)  f_follow_symlinks=1
+    #     ;;
+    g)  f_global=1
+        ;;
+    h)  f_help=1
+        ;;
+    i)  f_insensitive=1
+        ;;
+    m)  f_multiline=1
+        ;;
+    o)  f_search_options=1
+        search_options="${OPTARG}"
+        ;;
+    u)  f_unrestricted=1
+        ;;
+    v)  f_verbose=1
+        ;;
+    V)  f_version=1
+        ;;
+    \?) echo "* [ERROR] An invalid option has been entered: ${OPTARG}" >&2
+        return 1
+        ;;
+    :)  echo "* [ERROR] Option -${OPTARG} requires an argument" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  # options that exit
+  if [ $f_help -eq 1 ]; then
+    __prr-help
+    return 0
+  elif [ $f_version -eq 1 ]; then
+    __prr-version
+    return 0
+  fi
+
+  shift $((OPTIND-1))
+
+  [ "$1" = "--" ] && shift
+
+  # check arguments first, before disastrous things may happen
+  if [ -z "${1+nothing}" ] && [ -n "${ARGS}" ]; then
+    echo "* [ERROR]: Please provide SEARCH_PATTERN and REPLACE_PATTERN arguments" >&2
+    return 1
+  elif [ -z "${1+nothing}" ]; then
+    __prr-help
+    return 1
+  fi
+  if [ -z "${2+nothing}" ]; then
+    echo "* [ERROR]: Please provide REPLACE_PATTERN argument" >&2
+    return 1
+  fi
+
+  # Define variables
+  search_pattern="${1}"
+  replace_pattern="${2}"
+  path=( "${@:3}" )
+  if [ ${#path[@]} -eq 0 ]; then
+    path=( ./ )
+  fi
+
+  # Set flags
+  if [ $f_insensitive -eq 1 ]; then
+    search_flags="${search_flags}i"
+    replace_flags="${replace_flags}i"
+  else
+    search_flags="${search_flags}s"
+  fi
+
+#  [ $f_follow_symlinks -eq 1 ] && replace_flags="${search_flags}f"
+  [ $f_global          -eq 1 ] && replace_flags="${replace_flags}g"
+  [ $f_multiline       -eq 1 ] && replace_flags="${replace_flags}m"
+  [ $f_unrestricted    -eq 1 ] &&  search_flags="${search_flags}u"
+  [ $f_no_confirm      -eq 1 ] &&     f_confirm=0
+
+  # All variables are set, we can build the command strings
+  search_command_string="$(__prr-build-search-command-string ${search_flags} "${search_options}" "${search_pattern}" "${path[@]}")"
+  replace_command_string="$(__prr-build-replace-command-string "${replace_flags}" "${search_pattern}" "${replace_pattern}")"
+
+  # DEBUG
+  if [ $f_debug -eq 1 ]; then
+    __prr-debug
+    return 1
+  fi
+
+  # AG COMMAND
+  local tmp_dir="$(__prr-tmp-dir)"
+  local stderr_search="${tmp_dir}/stderr_search"
+  local _files="$(__prr-search-command ${search_flags} "${search_options}" "${search_pattern}" "${path[@]}" 2>"${stderr_search}")"
+  
+  if [ ! -z "${_files}" ]; then
+    local _line
+    while read -r _line; do
+       files+=("$_line")
+    done <<< "$_files"
+  fi
+
+  if [ -s "${stderr_search}" ]; then
+    echo "* [ERROR] Errors found when running search command." >&2
+    cat "${stderr_search}" >&2
+    return 1
+  fi
+  file_matches=${#files[@]}
+
+  if [ ${file_matches} -eq 0 ]; then
+    echo "${search_command_string}"
+    echo "* No files matched your search pattern" >&2
+  else
+    if [ $f_dry_run -eq 0 ]; then
+      if [ $f_verbose -eq 1 ] || [ $f_confirm -eq 1 ]; then
+        if [ ${file_matches} -eq 1 ]; then
+          local _file_string="1 file"
+        else
+          local _file_string="${file_matches} files"
+        fi
+        if [ $f_confirm -ne 1 ]; then
+          echo "* ${_file_string} matched your search pattern:"
+        fi
+        printf -- '- %q\n' "${files[@]}"
+        # printf -- '- %s\n' "${files[@]}"
+        printf '\n'
+      fi
+      # PERL COMMAND
+      if [ $f_confirm -eq 1 ]; then
+__prr-confirm "* You are about to modify ${file_matches} files (listed above).
+Do you want to execute:
+  ${replace_command_string}
+[Y] to replace / [N] to skip.
+Please Confirm:"
+
+        if [ $? -ne 0 ]; then
+          echo "* Skipping..."
+          return 1
+        fi
+      fi
+
+      echo "${search_command_string} | xargs ${replace_command_string}"
+
+      local stderr_replace="${tmp_dir}/stderr_replace"
+      __prr-replace-command "${replace_flags}" "${search_pattern}" "${replace_pattern}" "${files[@]}" 2>"${stderr_replace}"
+      # if file is not empty
+      if [ -s "${stderr_replace}" ]; then
+        echo "* [ERROR] Errors found when running replace command." >&2
+        cat "${stderr_replace}" >&2
+        return 1
+      fi
+
+      if [ $f_verbose -eq 1 ] || [ $f_confirm -eq 1 ]; then
+        echo "* ${_file_string} modified."
+      fi
+    else
+      # Dry-run
+      printf "%q\n" "${files[@]}"
+    fi
+  fi
+}
+
+# Determine if file is being source or invoked directly
+# http://stackoverflow.com/questions/9850166/how-to-determine-if-a-shell-script-file-is-sourced-in-bash
+if [ "x$(awk -F/ '{print $NF}' <<< "${0}")" != 'xcdruntime' ]; then
+  prr "$@"
+  exit 0
+fi
