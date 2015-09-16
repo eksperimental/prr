@@ -61,8 +61,8 @@ do two things:
 1. Sets the **confirm** option (`-c`) on, by default. So you will be asked to confirm and showed the
   command that will be executed, and the list of files that will be modified.
 
-2. Sets the **backup** options (`-b`) on, by default. Files will be backed up with the extension `.prr-bak`.
-  Just be aware that only older backups for the same file will be overwritten by the new ones.
+2. Sets the **backup** options (`-b`) on, by default. Files will be backed-up with the extension current
+  date in the format ".YYYYMMDD_HHMMSS.prr-bak".
 
 You can turn off both options by using `-C` and `-B` respectively.
 
@@ -116,7 +116,8 @@ If you think something is not working as expected, please
 
 
 # TODO
-* Escape quotes in SEARCH_PATTERN and REPLACE_PATTERN
+* Add "delete backups" feature.
+* Escape quotes in SEARCH_OPTIONS, SEARCH_PATTERN, REPLACE_PATTERN
 * Once tested thoroughly I will enable the "follow symlinks" options.
   Which I decide to to disable momentarily just to rest on the safe side.
 

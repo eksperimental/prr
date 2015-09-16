@@ -12,11 +12,11 @@ prr() {
   local APP_TITLE="P(erl) R(eplace) R(ecursively)"
   local APP_VERSION="0.0.3"
   local ARGS="${*}"
-  local BACKUP_EXTENSION_DEFAULT=".prr-bak"
   # Flags
   local search_flags="-l"
   local replace_flags=""
   local search_options=""
+  local search_ignore_backup="--ignore=*.prr-bak"
   # Args
   local f_backup=1
   local f_no_backup=0
@@ -31,6 +31,7 @@ prr() {
   local f_multiline=0
   local f_search_options=0
   local f_unrestricted=0
+  local f_no_ignore_backup=0
   local f_verbose=0
   local f_version=0
   # Options
@@ -46,19 +47,18 @@ prr() {
 
 __prr-help() {
 cat << EOF
-${APP_NAME} v$(__prr-version 1) – ${APP_TITLE}
+${APP_NAME} v$(__prr-version --number) – ${APP_TITLE}
 Search and replace files recursively.
 
 It uses a combination both of the fastest tools for the job:
 * "ag" (the silver searcher) – for searching the files
 * perl for actually doing the string substitutions them.
 
-Usage: ${APP_NAME} [-cCdDghimuvV] [-o SEARCH_OPTIONS] SEARCH_PATTERN REPLACE_PATTERN [PATH]
+Usage: ${APP_NAME} [-cCdDghimuUvV] [-o SEARCH_OPTIONS] SEARCH_PATTERN REPLACE_PATTERN [PATH]
 
   -b            Backup modified files. Files will be backed-up with
-                  the extension ".prr-bak". Just be aware that only
-                  older backups for the same file will be overwritten
-                  by the new ones.
+                  the extension current date in the format
+                  ".YYYYMMDD_HHMMSS.prr-bak".
   -B            Do not backup (overrides "-b")
   -c            Confirm before replacing. It will list the files that
                   will be modified, and the perl command that is going
@@ -74,18 +74,23 @@ Usage: ${APP_NAME} [-cCdDghimuvV] [-o SEARCH_OPTIONS] SEARCH_PATTERN REPLACE_PAT
   -m            Multi-line replacement
   -o            Search options. Any valid extra argument accepted by
                   "ag" searcher.
-                  Ex: "--ignore-dir ./somedir/ --ignore *.ext"
-                  Please surround all options in one set of quotes.
+                  Ex: "--ignore-dir=./somedir/ --ignore=*.ext"
+                  Please surround all options in one set of quotes,
+                  and does not use spaces between the option and the value,
+                  Use "--option=value"
   -u            Unrestricted search. ignores "ignore files" such us
-                .gitignore, .agignore
+                .gitignore, .agignore. It will still ignore backup files
+                create by prr (*.prr-bak).
                   By default files listed in these files are ignored
+  -U            Do not ignore prr backup files (*.prr-bak).
   -v            Verbose
   -V            Print version number
  
-  SEARCH        search regular expression
-  REPLACE       replace regular expression
-  PATH          multiple directory or file to look for files.
-                  e.g. "dir1" "dir2"
+  SEARCH        Search regular expression
+  REPLACE       Replace regular expression
+  PATH          Multiple directory or file to look for files.
+                  You can expand aswell, for example choossing *.
+                  e.g. "dir1/" "dir2/"
  
 Example:
   # replace all occurences of "alpha" (case insensitive) with "beta"
@@ -102,7 +107,7 @@ EOF
 __prr-debug() {
   echo "* DEBUGGING INFORMATION *" >&2
   echo "version:" >&2
-  echo "  $(__prr-version 1)" >&2
+  echo "  $(__prr-version --number)" >&2
   echo "flags:" >&2
   echo "  -b: ${f_backup}" >&2
   echo "  -B: ${f_no_backup}" >&2
@@ -118,6 +123,7 @@ __prr-debug() {
   echo "  -o: ${f_search_options}" >&2
   echo "  -o (arg): ${search_options}" >&2
   echo "  -u: ${f_unrestricted}" >&2
+  echo "  -U: ${f_no_ignore_backup}" >&2
   echo "  -v: ${f_verbose}" >&2
   echo "  -V: ${f_version}" >&2
   echo "parameters:" >&2
@@ -131,9 +137,9 @@ __prr-debug() {
   echo  >&2
 }
 
-# if an argument is pass, it prints only the version number (excludes app_name)
+# __prr-version [--number]
 __prr-version() {
-  if [ -z "${1}" ]; then
+  if [ "${1}" = "--number" ]; then
     echo "${APP_NAME} ${APP_VERSION}"
   else
     echo "${APP_VERSION}"
@@ -142,17 +148,29 @@ __prr-version() {
 
 # __prr-search-command SEARCH_FLAGS SEARCH_OPTIONS SEARCH_PATTERN PATH
 __prr-search-command() {
-  ag ${1} --ignore "*.prr-bak" ${2} -- "${3}" "${@:4}"
+#TODO: FIX: at the moment ${2} doesn't interpret properly quotes like: '--ignore "*.prr-bak"'
+  # if [ ${f_no_ignore_backup} -eq 1 ]; then
+  #   ag ${1} ${2} -- "${3}" "${@:4}"
+  # else
+  #   ag ${1} --ignore "*.prr-bak" ${2} -- "${3}" "${@:4}"
+  # fi
+  ag ${1} ${2} -- "${3}" "${@:4}"
 }
 
 # __prr-build-search-command-string SEARCH_FLAGS SEARCH_OPTIONS SEARCH_PATTERN PATH
 __prr-build-search-command-string() {
-  echo "ag ${1} --ignore \"*.prr-bak\" ${2} -- \"${3}\" ${*:4}"
+  # if [ ${f_no_ignore_backup} -eq 1 ]; then
+  #   local _ignore_backup=""
+  # else
+  #   local _ignore_backup="--ignore \"*.prr-bak\""
+  # fi
+  # echo "ag ${1} ${_ignore_backup} ${2} -- \"${3}\" ${*:4}"
+  echo "ag ${1} ${2} -- \"${3}\" ${*:4}"
 }
 
 __prr-backup-suffix() {
   if [ $f_backup -eq 1 ]; then
-    echo "${BACKUP_EXTENSION_DEFAULT}"
+    echo ".$(date +"%Y%m%d_%H%M%S").prr-bak"
   fi
 }
 
@@ -221,7 +239,7 @@ __prr-tmp-dir() {
   # A POSIX variable
   OPTIND=1 # Reset in case getopts has been used previously in the shell.
 
-  while getopts ":b:BcCdDghimo:uvV" opt; do
+  while getopts ":bBcCdDghimo:uUvV" opt; do
     case "$opt" in
     b)  f_backup=1
         ;;
@@ -249,6 +267,8 @@ __prr-tmp-dir() {
         search_options="${OPTARG}"
         ;;
     u)  f_unrestricted=1
+        ;;
+    U)  f_no_ignore_backup=1
         ;;
     v)  f_verbose=1
         ;;
@@ -305,12 +325,13 @@ __prr-tmp-dir() {
     search_flags="${search_flags}s"
   fi
 
-#  [ $f_follow_symlinks -eq 1 ] && replace_flags="${search_flags}f"
-  [ $f_global          -eq 1 ] && replace_flags="${replace_flags}g"
-  [ $f_multiline       -eq 1 ] && replace_flags="${replace_flags}m"
-  [ $f_unrestricted    -eq 1 ] &&  search_flags="${search_flags}u"
-  [ $f_no_confirm      -eq 1 ] &&     f_confirm=0
-  [ $f_no_backup       -eq 1 ] &&      f_backup=0
+#  [ $f_follow_symlinks  -eq 1 ] && replace_flags="${search_flags}f"
+  [ $f_global           -eq 1 ] && replace_flags="${replace_flags}g"
+  [ $f_multiline        -eq 1 ] && replace_flags="${replace_flags}m"
+  [ $f_unrestricted     -eq 1 ] && search_flags="${search_flags}u"
+  [ $f_no_confirm       -eq 1 ] && f_confirm=0
+  [ $f_no_backup        -eq 1 ] && f_backup=0
+  [ $f_no_ignore_backup -eq 0 ] && search_options="${search_ignore_backup} ${search_options}"
 
   # All variables are set, we can build the command strings
   search_command_string="$(__prr-build-search-command-string ${search_flags} "${search_options}" "${search_pattern}" "${path[@]}")"
