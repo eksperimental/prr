@@ -10,7 +10,7 @@
 prr() {
   local APP_NAME="prr"
   local APP_TITLE="P(erl) R(eplace) R(ecursively)"
-  local APP_VERSION="0.0.3"
+  local APP_VERSION="0.0.4-dev"
   local ARGS="${*}"
   # Flags
   local search_flags="-l"
